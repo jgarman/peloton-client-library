@@ -232,26 +232,9 @@ class PelotonObject:
         return ret
 
 
-class PelotonAPI:
-    """ Base class that factory classes within this module inherit from.
-    This class is _not_ meant to be utilized directly, so don't do it.
-
-    Core "working" class of the Peolton API Module
+class PelotonAPISession:
+    """Core "working" class of the Peloton API Module
     """
-
-    peloton_username = None
-    peloton_password = None
-
-    # Hold a request.Session instance that we're going to
-    # rely on to make API calls
-    peloton_session = None
-
-    # Being friendly (by default), use the same page size
-    # that the Peloton website uses
-    page_size = 10
-
-    # Hold our user ID (pulled when we authenticate to the API)
-    user_id = None
 
     # Headers we'll be using for each request
     headers = {
@@ -259,8 +242,24 @@ class PelotonAPI:
         "User-Agent": _USER_AGENT
     }
 
-    @classmethod
-    def _api_request(cls, uri, params={}):
+    def __init__(self, peloton_username=None, peloton_password=None):
+        self.peloton_username = peloton_username
+        self.peloton_password = peloton_password
+
+        # Hold a request.Session instance that we're going to
+        # rely on to make API calls
+        self.peloton_session = None
+
+        # Being friendly (by default), use the same page size
+        # that the Peloton website uses
+        self.page_size = 10
+
+        # Hold our user ID (pulled when we authenticate to the API)
+        # this can be changed if we change the current user
+        self.user = None
+        self.current_user = None
+
+    def _api_request(self, uri, params={}):
         """ Base function that everything will use under the hood to
             interact with the API
 
@@ -268,12 +267,12 @@ class PelotonAPI:
         """
 
         # Create a session if we don't have one yet
-        if cls.peloton_session is None:
-            cls._create_api_session()
+        if self.peloton_session is None:
+            self._create_api_session()
 
         get_logger().debug("Request {} [{}]".format(_BASE_URL + uri, params))
-        resp = cls.peloton_session.get(
-            _BASE_URL + uri, headers=cls.headers, params=params)
+        resp = self.peloton_session.get(
+            _BASE_URL + uri, headers=self.headers, params=params)
         get_logger().debug("Response {}: [{}]".format(
             resp.status_code, resp._content))
 
@@ -293,44 +292,82 @@ class PelotonAPI:
 
         return resp
 
-    @classmethod
-    def _create_api_session(cls):
+    def _api_post(self, uri, params=None):
+        if self.peloton_session is None:
+            self._create_api_session()
+
+        get_logger().debug("Request {} [{}]".format(_BASE_URL + uri, params))
+        resp = self.peloton_session.post(
+            _BASE_URL + uri, headers=self.headers, json=params)
+        get_logger().debug("Response {}: [{}]".format(
+            resp.status_code, resp._content))
+
+        # If we don't have a 200 code
+        if not (200 >= resp.status_code < 300):
+
+            message = resp._content
+
+            if 300 <= resp.status_code < 400:
+                raise PelotonRedirectError("Unexpected Redirect", resp)
+
+            elif 400 <= resp.status_code < 500:
+                raise PelotonClientError(message, resp)
+
+            elif 500 <= resp.status_code < 600:
+                raise PelotonServerError(message, resp)
+
+        return resp
+
+    def _create_api_session(self):
         """ Create a session instance for communicating with the API
         """
 
-        if cls.peloton_username is None:
-            cls.peloton_username = PELOTON_USERNAME
+        if self.peloton_username is None:
+            self.peloton_username = PELOTON_USERNAME
 
-        if cls.peloton_password is None:
-            cls.peloton_password = PELOTON_PASSWORD
+        if self.peloton_password is None:
+            self.peloton_password = PELOTON_PASSWORD
 
-        if cls.peloton_username is None or cls.peloton_password is None:
+        if self.peloton_username is None or self.peloton_password is None:
             raise PelotonClientError(
                 "The Peloton Client Library requires a `username` "
                 "and `password` be set in "
                 "`/.config/peloton, under section `peloton`")
 
         payload = {
-            'username_or_email': cls.peloton_username,
-            'password': cls.peloton_password
+            'username_or_email': self.peloton_username,
+            'password': self.peloton_password
         }
 
-        cls.peloton_session = requests.Session()
-        resp = cls.peloton_session.post(
-            _BASE_URL + '/auth/login', json=payload, headers=cls.headers)
-        message = resp._content
+        self.peloton_session = requests.Session()
+        resp = self.peloton_session.post(
+            _BASE_URL + '/auth/login', json=payload, headers=self.headers)
 
         if 300 <= resp.status_code < 400:
             raise PelotonRedirectError("Unexpected Redirect", resp)
 
         elif 400 <= resp.status_code < 500:
-            raise PelotonClientError(message, resp)
+            raise PelotonClientError(resp.content, resp)
 
         elif 500 <= resp.status_code < 600:
-            raise PelotonServerError(message, resp)
+            raise PelotonServerError(resp.content, resp)
+
+        try:
+            message = resp.json()
+        except Exception:
+            raise PelotonServerError(resp.content, resp)
 
         # Set our User ID on our class
-        cls.user_id = resp.json()['user_id']
+        self.session_id = message.get('session_id', None)
+        self.user = PelotonUser(**message.get('user_data'))
+        self.current_user = PelotonUser(**message.get('user_data'))
+
+    @property
+    def current_user_id(self):
+        if self.current_user is None:
+            self._create_api_session()
+
+        return self.current_user.id
 
 
 class PelotonUser(PelotonObject):
@@ -345,6 +382,9 @@ class PelotonUser(PelotonObject):
 
         self.username = kwargs.get('username')
         self.id = kwargs.get('id')
+        self.relationship = kwargs.get('relationship')
+        self.image_url = kwargs.get('image_url')
+        self.total_workouts = kwargs.get('total_workouts')
 
     def __str__(self):
         return self.username
@@ -445,24 +485,6 @@ class PelotonWorkout(PelotonObject):
                 return metrics
 
         return value
-
-    @classmethod
-    def get(cls, workout_id):
-        """ Get a specific workout
-        """
-        return PelotonWorkoutFactory.get(workout_id)
-
-    @classmethod
-    def list(cls):
-        """ Return a list of all workouts
-        """
-        return PelotonWorkoutFactory.list()
-
-    @classmethod
-    def latest(cls):
-        """ Returns the lastest workout object
-        """
-        return PelotonWorkoutFactory.latest()
 
 
 class PelotonRide(PelotonObject):
@@ -610,7 +632,7 @@ class PelotonWorkoutAchievement(PelotonObject):
         self.name = kwargs.get('name')
 
 
-class PelotonWorkoutFactory(PelotonAPI):
+class PelotonWorkoutFactory:
     """ Class that handles fetching data and instantiating objects
 
     See PelotonWorkout for details
@@ -624,10 +646,7 @@ class PelotonWorkoutFactory(PelotonAPI):
 
         # We need a user ID to list all workouts. @pelotoncycle, please
         # don't do this :(
-        if cls.user_id is None:
-            cls._create_api_session()
-
-        uri = '/api/user/{}/workouts'.format(cls.user_id)
+        uri = '/api/user/{}/workouts'.format(PelotonAPI.current_user_id)
         params = {
             'page': 0,
             'limit': results_per_page,
@@ -635,7 +654,7 @@ class PelotonWorkoutFactory(PelotonAPI):
         }
 
         # Get our first page, which includes number of successive pages
-        res = cls._api_request(uri, params).json()
+        res = PelotonAPI._api_request(uri, params).json()
 
         # Add this pages data to our return list
         ret = [PelotonWorkout(**workout) for workout in res['data']]
@@ -644,7 +663,7 @@ class PelotonWorkoutFactory(PelotonAPI):
         for i in range(1, res['page_count']):
 
             params['page'] += 1
-            res = cls._api_request(uri, params).json()
+            res = PelotonAPI._api_request(uri, params).json()
             [ret.append(PelotonWorkout(**workout)) for workout in res['data']]
 
         return ret
@@ -666,10 +685,7 @@ class PelotonWorkoutFactory(PelotonAPI):
 
         # We need a user ID to list all workouts. @pelotoncycle, please
         # don't do this :(
-        if cls.user_id is None:
-            cls._create_api_session()
-
-        uri = '/api/user/{}/workouts'.format(cls.user_id)
+        uri = '/api/user/{}/workouts'.format(PelotonAPI.current_user_id)
         params = {
             'page': 0,
             'limit': 1,
@@ -677,14 +693,14 @@ class PelotonWorkoutFactory(PelotonAPI):
         }
 
         # Get our first page, which includes number of successive pages
-        res = cls._api_request(uri, params).json()
+        res = PelotonAPI._api_request(uri, params).json()
 
         # Return our single workout, without having to get a bunch of
         # extra data from the API
         return PelotonWorkout(**res['data'][0])
 
 
-class PelotonWorkoutMetricsFactory(PelotonAPI):
+class PelotonWorkoutMetricsFactory:
     """ Class to handle fetching and transformation of metric data
     """
 
@@ -698,5 +714,44 @@ class PelotonWorkoutMetricsFactory(PelotonAPI):
             'every_n': 1
         }
 
-        res = cls._api_request(uri, params).json()
+        res = PelotonAPI._api_request(uri, params).json()
         return PelotonWorkoutMetrics(**res)
+
+
+# create a peloton API object when the module is imported
+PelotonAPI = PelotonAPISession()
+
+
+def get_followers():
+    followers = PelotonAPI._api_request(f"/api/user/{PelotonAPI.current_user_id}/followers").json().get("data", list())
+    return [PelotonUser(**i) for i in followers]
+
+
+def get_following():
+    following = PelotonAPI._api_request(f"/api/user/{PelotonAPI.current_user_id}/following").json().get("data", list())
+    return [PelotonUser(**i) for i in following]
+
+
+def follow_user(u):
+    user_id = u.id
+    params = {
+        "user_id": user_id,
+        "action": "follow"
+    }
+    response = PelotonAPI._api_post("/api/user/change_relationship", params=params)
+    print(response.status_code, response.content)
+
+
+def approve_user(u):
+    user_id = u.id
+    params = {
+        "user_id": user_id,
+        "action": "approve"
+    }
+    response = PelotonAPI._api_post("/api/user/change_relationship", params=params)
+    print(response.status_code, response.content)
+
+
+def change_user(u):
+    PelotonAPI.current_user = u
+
