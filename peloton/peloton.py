@@ -644,8 +644,8 @@ class PelotonWorkoutFactory:
             each workout
         """
 
-        # We need a user ID to list all workouts. @pelotoncycle, please
-        # don't do this :(
+        # TODO: make this method return a generator instead of a list, so we can lazily retrieve the results.
+
         uri = '/api/user/{}/workouts'.format(PelotonAPI.current_user_id)
         params = {
             'page': 0,
@@ -683,8 +683,6 @@ class PelotonWorkoutFactory:
             the latest workout
         """
 
-        # We need a user ID to list all workouts. @pelotoncycle, please
-        # don't do this :(
         uri = '/api/user/{}/workouts'.format(PelotonAPI.current_user_id)
         params = {
             'page': 0,

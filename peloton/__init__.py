@@ -12,6 +12,8 @@ from .peloton import PelotonInstructor
 from .peloton import PelotonWorkoutSegment
 from .peloton import PelotonWorkoutFactory
 
+from .peloton import follow_user, get_followers, get_following, approve_user, change_user
+
 _ALL_ = [
     "NotLoaded",
     "PelotonException",
@@ -24,5 +26,11 @@ _ALL_ = [
     "PelotonInstructor",
     "PelotonWorkoutSegment",
 
-    "PelotonWorkoutFactory"
+    "PelotonWorkoutFactory",
+
+    "follow_user",
+    "get_followers",
+    "get_following",
+    "approve_user",
+    "change_user"
 ]
