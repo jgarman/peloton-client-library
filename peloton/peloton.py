@@ -360,14 +360,14 @@ class PelotonAPISession:
         # Set our User ID on our class
         self.session_id = message.get('session_id', None)
         self.user = PelotonUser(**message.get('user_data'))
-        self.current_user = PelotonUser(**message.get('user_data'))
+        self.current_user = self.user.id
 
     @property
     def current_user_id(self):
         if self.current_user is None:
             self._create_api_session()
 
-        return self.current_user.id
+        return self.current_user
 
 
 class PelotonUser(PelotonObject):
@@ -499,6 +499,10 @@ class PelotonRide(PelotonObject):
         self.id = kwargs.get('id')
         self.description = kwargs.get('description')
         self.duration = kwargs.get('duration')
+        self.image_url = kwargs.get('image_url')
+        self.scheduled_start_time = datetime.fromtimestamp(
+            kwargs.get('scheduled_start_time', 0), timezone.utc)
+        self.difficulty_estimate = kwargs.get('difficulty_estimate', 0.0)
 
         # When we make this Ride call from the workout factory, there
         # is no instructor data
@@ -595,6 +599,7 @@ class PelotonInstructor(PelotonObject):
 
     def __init__(self, **kwargs):
 
+        self.id = kwargs.get('id')
         self.name = kwargs.get('name')
         self.first_name = kwargs.get('first_name')
         self.last_name = kwargs.get('last_name')
@@ -604,6 +609,7 @@ class PelotonInstructor(PelotonObject):
         self.quote = kwargs.get('quote')
         self.background = kwargs.get('background')
         self.short_bio = kwargs.get('short_bio')
+        self.image_url = kwargs.get('image_url')
 
     def __str__(self):
         return self.name
@@ -657,16 +663,16 @@ class PelotonWorkoutFactory:
         res = PelotonAPI._api_request(uri, params).json()
 
         # Add this pages data to our return list
-        ret = [PelotonWorkout(**workout) for workout in res['data']]
+        for workout in res['data']:
+            yield PelotonWorkout(**workout)
 
         # We've got page 0, so start with page 1
         for i in range(1, res['page_count']):
-
             params['page'] += 1
             res = PelotonAPI._api_request(uri, params).json()
-            [ret.append(PelotonWorkout(**workout)) for workout in res['data']]
+            for workout in res['data']:
+                yield PelotonWorkout(**workout)
 
-        return ret
 
     @classmethod
     def get(cls, workout_id):
@@ -751,5 +757,9 @@ def approve_user(u):
 
 
 def change_user(u):
-    PelotonAPI.current_user = u
+    if isinstance(u, PelotonUser):
+        PelotonAPI.current_user = u.id
+    else:
+        PelotonAPI.current_user = u
+
 
