@@ -256,7 +256,6 @@ class PelotonAPISession:
 
         # Hold our user ID (pulled when we authenticate to the API)
         # this can be changed if we change the current user
-        self.user = None
         self.current_user = None
 
     def _api_request(self, uri, params={}):
@@ -359,8 +358,7 @@ class PelotonAPISession:
 
         # Set our User ID on our class
         self.session_id = message.get('session_id', None)
-        self.user = PelotonUser(**message.get('user_data'))
-        self.current_user = self.user.id
+        self.current_user = message.get("user_id", None)
 
     @property
     def current_user_id(self):
